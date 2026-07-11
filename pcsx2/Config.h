@@ -711,7 +711,11 @@ struct Pcsx2Config
 
 		union
 		{
-			u64 bitset;
+			// Aliases the bitfield flags below for cheap zeroing/comparison. The struct has grown
+			// past 64 flags, so this must be an array covering all of them - if the flag count ever
+			// exceeds 128, this needs another element, or changes to the extra flags will be
+			// silently ignored by OptionsAreEqual().
+			std::array<u64, 2> bitset;
 
 			struct
 			{

@@ -708,7 +708,12 @@ std::optional<bool> Pcsx2Config::GSOptions::TriStateToOptionalBoolean(int value)
 
 Pcsx2Config::GSOptions::GSOptions()
 {
-	bitset = 0;
+	bitset = {};
+
+	// Flags past the first 64 bits are not zeroed by older `bitset = 0`-style initialization,
+	// and these two were never explicitly initialized, so they previously started as garbage.
+	VideoCaptureAutoResolution = true;
+	OrganizeScreenshotsByGame = false;
 
 	PCRTCAntiBlur = true;
 	DisableInterlaceOffset = false;
