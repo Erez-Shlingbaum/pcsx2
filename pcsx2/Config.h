@@ -786,6 +786,7 @@ struct Pcsx2Config
 					LoadTextureReplacements : 1,
 					LoadTextureReplacementsAsync : 1,
 					PrecacheTextureReplacements : 1,
+					UpscaleReplacementTextures : 1,
 					EnableVideoCapture : 1,
 					EnableVideoCaptureParameters : 1,
 					VideoCaptureAutoResolution : 1,
@@ -881,6 +882,27 @@ struct Pcsx2Config
 		std::string Adapter;
 		std::string HWDumpDirectory;
 		std::string SWDumpDirectory;
+
+		// AI upscaling of dumped textures (invokes an external Real-ESRGAN/Upscayl-compatible
+		// executable as a separate process; nothing is linked or bundled).
+		std::string TextureUpscalerPath;
+		std::string TextureUpscalerModelDir;
+		std::string TextureUpscalerModelName;
+		int TextureUpscalerScale = 4;
+		// Number of times to feed the model's own output back into itself (a la Upscayl's "Double
+		// Upscayl"), for an effective scale of TextureUpscalerScale^TextureUpscalerPasses. This is
+		// the only way to exceed a model's fixed native scale (e.g. most Real-ESRGAN models are
+		// trained at a hard 4x and simply reject a higher -s). Cost is steep though: pass 2 runs
+		// the model over ~scale^2 as many pixels as pass 1, so keep this at 1 unless the output
+		// resolution genuinely calls for it. Clamped to [1, MAX_UPSCALER_PASSES] even from the ini.
+		int TextureUpscalerPasses = 1;
+		// Advanced overrides, deliberately INI-only (no UI): GPU index for multi-GPU systems
+		// (-1 = the CLI's default) and a fixed tile size (0 = adaptive, see BuildUpscalerArgs).
+		int TextureUpscalerGpuId = -1;
+		int TextureUpscalerTileSize = 0;
+		// Textures whose smaller dimension is below this aren't upscaled - AI models produce
+		// garbage on tiny inputs (icons, dithered fills, gradient strips).
+		int TextureUpscalerMinSize = 32;
 
 		GSOptions();
 

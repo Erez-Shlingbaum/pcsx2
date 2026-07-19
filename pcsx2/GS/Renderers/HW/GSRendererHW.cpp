@@ -3,6 +3,7 @@
 
 #include "GS/Renderers/HW/GSRendererHW.h"
 #include "GS/Renderers/HW/GSTextureReplacements.h"
+#include "GS/Renderers/HW/GSTextureUpscaler.h"
 #include "GS/GSGL.h"
 #include "GS/GSPerfMon.h"
 #include "GS/GSUtil.h"
@@ -96,6 +97,15 @@ void GSRendererHW::VSync(u32 field, bool registers_written, bool idle_frame)
 {
 	if (GSConfig.LoadTextureReplacements)
 		GSTextureReplacements::ProcessAsyncLoadedTextures();
+
+	// Seamlessly apply textures the background upscaler has finished. This registers the new files
+	// and swaps in-use textures via the async injection path - no directory rescan, no worker sync,
+	// and no cache purge, so it's cheap enough to do per-frame. Drain unconditionally (not only when
+	// loading is enabled) so the completed-file buffer can't grow without bound when upscaling is on
+	// but texture loading is off; AddReplacementFiles() no-ops in that case.
+	std::vector<std::string> upscaled_files;
+	if (GSTextureUpscaler::TakeCompletedFiles(&upscaled_files))
+		GSTextureReplacements::AddReplacementFiles(upscaled_files);
 
 	if (!idle_frame)
 	{

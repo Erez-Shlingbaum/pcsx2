@@ -1161,7 +1161,7 @@ namespace SettingWidgetBinder
 
 	static inline void BindWidgetToFolderSetting(SettingsInterface* sif, QLineEdit* widget, QAbstractButton* browse_button,
 		QAbstractButton* open_button, QAbstractButton* reset_button, std::string section, std::string key, std::string default_value,
-		bool use_relative = true)
+		bool use_relative = true, bool allow_empty = false)
 	{
 		using Accessor = SettingAccessor<QLineEdit>;
 
@@ -1186,7 +1186,7 @@ namespace SettingWidgetBinder
 		}
 
 
-		auto value_changed = [widget, section = std::move(section), key = std::move(key), default_value, use_relative]() {
+		auto value_changed = [widget, section = std::move(section), key = std::move(key), default_value, use_relative, allow_empty]() {
 			const std::string new_value(widget->text().toStdString());
 			if (!new_value.empty())
 			{
@@ -1209,8 +1209,19 @@ namespace SettingWidgetBinder
 
 					Host::CommitBaseSettingChanges();
 					g_emu_thread->updateEmuFolders();
+					g_emu_thread->applySettings();
 					return;
 				}
+			}
+			else if (allow_empty)
+			{
+				// An empty value is meaningful for this setting (e.g. "auto-detect"), so clearing
+				// the field is a valid way back to the default instead of an error.
+				Host::SetBaseStringSettingValue(section.c_str(), key.c_str(), "");
+				Host::CommitBaseSettingChanges();
+				g_emu_thread->updateEmuFolders();
+				g_emu_thread->applySettings();
+				return;
 			}
 			else
 			{
@@ -1263,7 +1274,7 @@ namespace SettingWidgetBinder
 
 	static inline void BindWidgetToFileSetting(SettingsInterface* sif, QLineEdit* widget, QAbstractButton* browse_button,
 		QAbstractButton* open_button, QAbstractButton* reset_button, std::string section, std::string key, std::string default_value,
-		const char* filter, bool allow_pergame = false, bool use_relative = true)
+		const char* filter, bool allow_pergame = false, bool use_relative = true, bool allow_empty = false)
 	{
 		using Accessor = SettingAccessor<QLineEdit>;
 
@@ -1286,7 +1297,7 @@ namespace SettingWidgetBinder
 			return;
 		}
 
-		auto value_changed = [widget, section = std::move(section), key = std::move(key), default_value, use_relative]() {
+		auto value_changed = [widget, section = std::move(section), key = std::move(key), default_value, use_relative, allow_empty]() {
 			const std::string new_value(widget->text().toStdString());
 			if (!new_value.empty())
 			{
@@ -1307,6 +1318,16 @@ namespace SettingWidgetBinder
 				}
 
 				Host::CommitBaseSettingChanges();
+				g_emu_thread->applySettings();
+				return;
+			}
+			else if (allow_empty)
+			{
+				// An empty value is meaningful for this setting (e.g. "auto-detect"), so clearing
+				// the field is a valid way back to the default instead of an error.
+				Host::SetBaseStringSettingValue(section.c_str(), key.c_str(), "");
+				Host::CommitBaseSettingChanges();
+				g_emu_thread->applySettings();
 				return;
 			}
 			else

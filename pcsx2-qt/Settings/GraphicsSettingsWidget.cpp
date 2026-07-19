@@ -13,6 +13,12 @@
 #include "pcsx2/GS/GSCapture.h"
 #include "pcsx2/GS/GSUtil.h"
 
+#ifdef _WIN32
+static const char* UPSCALER_EXECUTABLE_FILTER = QT_TRANSLATE_NOOP("GraphicsSettingsWidget", "Executables (*.exe);;All Files (*.*)");
+#else
+static const char* UPSCALER_EXECUTABLE_FILTER = QT_TRANSLATE_NOOP("GraphicsSettingsWidget", "All Files (*)");
+#endif
+
 struct RendererInfo
 {
 	const char* name;
@@ -230,6 +236,22 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
 	connect(m_ui.loadTextureReplacements, &QCheckBox::checkStateChanged, this, &GraphicsSettingsWidget::onTextureReplacementChanged);
 	onTextureDumpChanged();
 	onTextureReplacementChanged();
+
+	//////////////////////////////////////////////////////////////////////////
+	// AI Texture Upscaling
+	//////////////////////////////////////////////////////////////////////////
+	SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.upscaleReplacementTextures, "EmuCore/GS", "UpscaleReplacementTextures", false);
+	// The executable/model paths are machine-local, so they're only editable in the global config
+	// (the folder binder below greys itself out per-game; mirror that for the executable picker).
+	// Both allow an empty value, which means "auto-detect an installed Upscayl".
+	SettingWidgetBinder::BindWidgetToFileSetting(sif, m_ui.textureUpscalerPath, m_ui.textureUpscalerBrowse, nullptr, nullptr,
+		"EmuCore/GS", "TextureUpscalerPath", std::string(), UPSCALER_EXECUTABLE_FILTER, !m_dialog->isPerGameSettings(), false, true);
+	SettingWidgetBinder::BindWidgetToFolderSetting(sif, m_ui.textureUpscalerModelDir, m_ui.textureUpscalerModelDirBrowse, nullptr, nullptr,
+		"EmuCore/GS", "TextureUpscalerModelDir", std::string(), false, true);
+	SettingWidgetBinder::BindWidgetToStringSetting(sif, m_ui.textureUpscalerModelName, "EmuCore/GS", "TextureUpscalerModelName");
+	SettingWidgetBinder::BindWidgetToIntSetting(sif, m_ui.textureUpscalerScale, "EmuCore/GS", "TextureUpscalerScale", 4);
+	SettingWidgetBinder::BindWidgetToIntSetting(sif, m_ui.textureUpscalerPasses, "EmuCore/GS", "TextureUpscalerPasses", 1);
+	SettingWidgetBinder::BindWidgetToIntSetting(sif, m_ui.textureUpscalerMinSize, "EmuCore/GS", "TextureUpscalerMinSize", 32);
 
 	if (m_dialog->isPerGameSettings())
 	{
@@ -701,7 +723,9 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
 
 	// Texture Replacement tab
 	{
-		dialog->registerWidgetHelp(m_ui.dumpReplaceableTextures, tr("Dump Textures"), tr("Unchecked"), tr("Dumps replaceable textures to disk. Will reduce performance."));
+		dialog->registerWidgetHelp(m_ui.dumpReplaceableTextures, tr("Dump Textures"), tr("Unchecked"),
+			tr("Dumps replaceable textures to disk. Will reduce performance. This is independent of AI Upscaling below: turning that off "
+			   "does not turn this off, so dumping (and its unsafe-settings warning) continues until you uncheck this too."));
 
 		dialog->registerWidgetHelp(m_ui.dumpReplaceableMipmaps, tr("Dump Mipmaps"), tr("Unchecked"), tr("Includes mipmaps when dumping textures."));
 
@@ -712,6 +736,33 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
 		dialog->registerWidgetHelp(m_ui.loadTextureReplacements, tr("Load Textures"), tr("Unchecked"), tr("Loads replacement textures where available and user-provided."));
 
 		dialog->registerWidgetHelp(m_ui.precacheTextureReplacements, tr("Precache Textures"), tr("Unchecked"), tr("Preloads all replacement textures to memory. Not necessary with asynchronous loading."));
+
+		dialog->registerWidgetHelp(m_ui.upscaleReplacementTextures, tr("Upscale Dumped Textures"), tr("Unchecked"),
+			tr("Runs an external AI upscaler (Real-ESRGAN / Upscayl) on every dumped texture in the background, and writes the result into the "
+			   "replacements folder. Requires Dump Textures to produce input, and Load Textures to display the results. Nothing is bundled with "
+			   "PCSX2: you must install the upscaler yourself, though the paths below are auto-detected from an Upscayl installation when left blank."));
+
+		dialog->registerWidgetHelp(m_ui.textureUpscalerPath, tr("Executable"), tr("Auto-detected"),
+			tr("Path to the upscaler executable (e.g. upscayl-bin or realesrgan-ncnn-vulkan). Leave blank to auto-detect an installed Upscayl."));
+
+		dialog->registerWidgetHelp(m_ui.textureUpscalerModelDir, tr("Model Directory"), tr("Auto-detected"),
+			tr("Folder containing the AI model files (.param/.bin). Leave blank to use the models bundled with the detected Upscayl installation."));
+
+		dialog->registerWidgetHelp(m_ui.textureUpscalerModelName, tr("Model Name"), tr("Auto-detected"),
+			tr("Name of the AI model to use, without extension (e.g. upscayl-standard-4x). Leave blank to pick a sensible default."));
+
+		dialog->registerWidgetHelp(m_ui.textureUpscalerScale, tr("Upscale Factor"), tr("4"),
+			tr("Output size multiplier. Most models are natively 4x; lower values downscale the result."));
+
+		dialog->registerWidgetHelp(m_ui.textureUpscalerPasses, tr("Passes"), tr("1"),
+			tr("Re-runs the model on its own output this many times (like Upscayl's \"Double Upscayl\"), for an effective scale of "
+			   "Upscale Factor ^ Passes - e.g. 4x with 2 passes gives 16x. This is the only way past a model's fixed native scale, but "
+			   "each extra pass reprocesses a much larger image through the model again, so processing time (and the on-disk/VRAM size "
+			   "of every replacement texture) grows steeply. Leave at 1 unless you specifically need very large output textures."));
+
+		dialog->registerWidgetHelp(m_ui.textureUpscalerMinSize, tr("Minimum Texture Size"), tr("32 px"),
+			tr("Textures whose smaller dimension is below this are left at native resolution. AI models produce noisy garbage on tiny "
+			   "inputs such as icons, dithered fills and gradient strips. 0 upscales everything."));
 	}
 
 	// Post Processing tab

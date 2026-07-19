@@ -776,6 +776,7 @@ Pcsx2Config::GSOptions::GSOptions()
 	LoadTextureReplacements = false;
 	LoadTextureReplacementsAsync = true;
 	PrecacheTextureReplacements = false;
+	UpscaleReplacementTextures = false;
 
 	EnableVideoCapture = true;
 	EnableVideoCaptureParameters = false;
@@ -883,7 +884,16 @@ bool Pcsx2Config::GSOptions::OptionsAreEqual(const GSOptions& right) const
 		OpEqu(Adapter) &&
 
 		OpEqu(HWDumpDirectory) &&
-		OpEqu(SWDumpDirectory));
+		OpEqu(SWDumpDirectory) &&
+
+		OpEqu(TextureUpscalerPath) &&
+		OpEqu(TextureUpscalerModelDir) &&
+		OpEqu(TextureUpscalerModelName) &&
+		OpEqu(TextureUpscalerScale) &&
+		OpEqu(TextureUpscalerPasses) &&
+		OpEqu(TextureUpscalerGpuId) &&
+		OpEqu(TextureUpscalerTileSize) &&
+		OpEqu(TextureUpscalerMinSize));
 }
 
 bool Pcsx2Config::GSOptions::operator!=(const GSOptions& right) const
@@ -1000,6 +1010,15 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
 	SettingsWrapBitBool(LoadTextureReplacements);
 	SettingsWrapBitBool(LoadTextureReplacementsAsync);
 	SettingsWrapBitBool(PrecacheTextureReplacements);
+	SettingsWrapBitBool(UpscaleReplacementTextures);
+	SettingsWrapEntry(TextureUpscalerPath);
+	SettingsWrapEntry(TextureUpscalerModelDir);
+	SettingsWrapEntry(TextureUpscalerModelName);
+	SettingsWrapEntry(TextureUpscalerScale);
+	SettingsWrapEntry(TextureUpscalerPasses);
+	SettingsWrapEntry(TextureUpscalerGpuId);
+	SettingsWrapEntry(TextureUpscalerTileSize);
+	SettingsWrapEntry(TextureUpscalerMinSize);
 	SettingsWrapBitBool(EnableVideoCapture);
 	SettingsWrapBitBool(EnableVideoCaptureParameters);
 	SettingsWrapBitBool(VideoCaptureAutoResolution);

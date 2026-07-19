@@ -32,6 +32,10 @@ namespace GSTextureReplacements
 	void Initialize();
 	void GameChanged();
 	void ReloadReplacementMap();
+
+	/// Incrementally registers freshly-created replacement files (e.g. from the AI upscaler)
+	/// without rescanning the replacement directory. Call on the GS thread.
+	void AddReplacementFiles(const std::vector<std::string>& paths);
 	void UpdateConfig(Pcsx2Config::GSOptions& old_config);
 	void Shutdown();
 
