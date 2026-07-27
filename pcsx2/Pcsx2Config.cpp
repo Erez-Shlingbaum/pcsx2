@@ -891,6 +891,12 @@ bool Pcsx2Config::GSOptions::OptionsAreEqual(const GSOptions& right) const
 		OpEqu(TextureUpscalerModelName) &&
 		OpEqu(TextureUpscalerScale) &&
 		OpEqu(TextureUpscalerPasses) &&
+		OpEqu(TextureUpscalerStep2ModelName) &&
+		OpEqu(TextureUpscalerStep2Scale) &&
+		OpEqu(TextureUpscalerStep2Repeat) &&
+		OpEqu(TextureUpscalerStep3ModelName) &&
+		OpEqu(TextureUpscalerStep3Scale) &&
+		OpEqu(TextureUpscalerStep3Repeat) &&
 		OpEqu(TextureUpscalerGpuId) &&
 		OpEqu(TextureUpscalerTileSize) &&
 		OpEqu(TextureUpscalerMinSize));
@@ -1016,6 +1022,12 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
 	SettingsWrapEntry(TextureUpscalerModelName);
 	SettingsWrapEntry(TextureUpscalerScale);
 	SettingsWrapEntry(TextureUpscalerPasses);
+	SettingsWrapEntry(TextureUpscalerStep2ModelName);
+	SettingsWrapEntry(TextureUpscalerStep2Scale);
+	SettingsWrapEntry(TextureUpscalerStep2Repeat);
+	SettingsWrapEntry(TextureUpscalerStep3ModelName);
+	SettingsWrapEntry(TextureUpscalerStep3Scale);
+	SettingsWrapEntry(TextureUpscalerStep3Repeat);
 	SettingsWrapEntry(TextureUpscalerGpuId);
 	SettingsWrapEntry(TextureUpscalerTileSize);
 	SettingsWrapEntry(TextureUpscalerMinSize);

@@ -48,6 +48,21 @@ extern char** environ;
 
 namespace GSTextureUpscaler
 {
+	// One chained upscaler invocation: a model name and the scale it's run at. A job's full chain
+	// (Job::steps) is the flattened, ordered list of these - one entry per pass, so a step
+	// configured with a repeat count > 1 simply appears as that many identical consecutive entries.
+	struct UpscaleStep
+	{
+		std::string model_name;
+		int scale;
+	};
+
+	static bool operator==(const UpscaleStep& a, const UpscaleStep& b)
+	{
+		return a.scale == b.scale && a.model_name == b.model_name;
+	}
+	static bool operator!=(const UpscaleStep& a, const UpscaleStep& b) { return !(a == b); }
+
 	struct Job
 	{
 		std::string input;
@@ -55,28 +70,24 @@ namespace GSTextureUpscaler
 		// Config snapshot captured at enqueue time, so the worker never races UpdateConfig().
 		std::string exe_path;
 		std::string model_dir;
-		std::string model_name;
-		int scale;
-		int passes;
+		std::vector<UpscaleStep> steps;
 		int gpu_id;
 		int tile_size;
 	};
 
 	class ExternalProcess;
 
-	// Hard ceiling on chained passes, independent of whatever a hand-edited ini says - see
-	// TextureUpscalerPasses in Config.h. 3 passes already means scale^3 (e.g. 4x -> 64x), which is
-	// already an extreme setting; this just bounds how far a bad config value can run.
-	static constexpr int MAX_UPSCALER_PASSES = 3;
+	// Hard ceiling on each step's repeat count, independent of whatever a hand-edited ini says -
+	// see TextureUpscalerPasses/Step2Repeat/Step3Repeat in Config.h. Applies per step, not to the
+	// chain as a whole: up to 3 steps, each repeated up to 3 times, is the user's call.
+	static constexpr int MAX_STEP_REPEAT = 3;
 
 	// Cached config snapshot (read on the GS thread via UpdateConfig, consumed by the worker).
 	// s_enabled is atomic so IsEnabled() never contends on s_mutex from the GS thread.
 	static std::atomic<bool> s_enabled{false};
 	static std::string s_exe_path;
 	static std::string s_model_dir;
-	static std::string s_model_name;
-	static int s_scale = 4;
-	static int s_passes = 1;
+	static std::vector<UpscaleStep> s_steps;
 	static int s_gpu_id = -1;
 	static int s_tile_size = 0;
 
@@ -296,18 +307,24 @@ std::string GSTextureUpscaler::DeriveUpscalerModelDir(const std::string& exe)
 	return std::string();
 }
 
+static bool ModelExistsInDir(const std::string& model_dir, const char* name)
+{
+	return !model_dir.empty() && FileSystem::FileExists(Path::Combine(model_dir, fmt::format("{}.param", name)).c_str());
+}
+
 // Upscayl renames the bundled models, so the CLI's own default (realesrgan-x4plus) isn't present.
-// Prefer a well-known general-purpose model, but fall back to whatever .param the install actually
-// ships - a hardcoded name list rots as Upscayl rotates its bundled models, and coming up empty
-// makes the CLI fail later with a cryptic "model not found".
+// Prefer ultrasharp-4x (A/B-tested best on PS2-era art, especially chained into digital-art-4x -
+// see UpdateConfig), but fall back to whatever .param the install actually ships - a hardcoded
+// name list rots as Upscayl rotates its bundled models, and coming up empty makes the CLI fail
+// later with a cryptic "model not found".
 std::string GSTextureUpscaler::DefaultUpscalerModelName(const std::string& model_dir)
 {
 	if (model_dir.empty())
 		return std::string();
 
-	for (const char* name : {"upscayl-standard-4x", "ultrasharp-4x", "realesrgan-x4plus"})
+	for (const char* name : {"ultrasharp-4x", "upscayl-standard-4x", "realesrgan-x4plus"})
 	{
-		if (FileSystem::FileExists(Path::Combine(model_dir, fmt::format("{}.param", name)).c_str()))
+		if (ModelExistsInDir(model_dir, name))
 			return name;
 	}
 
@@ -327,7 +344,7 @@ void GSTextureUpscaler::UpdateConfig()
 	// Resolve blank fields by auto-detecting an installed Upscayl. Do the filesystem probing
 	// BEFORE taking the lock (so the worker's brief lock acquisitions aren't blocked on disk I/O),
 	// and skip it entirely when the feature is off - there's nothing to detect for.
-	std::string exe, model_dir, model_name;
+	std::string exe, model_dir, model_name, step2_model_name;
 	if (want_enabled)
 	{
 		exe = gs.TextureUpscalerPath;
@@ -339,19 +356,48 @@ void GSTextureUpscaler::UpdateConfig()
 			model_dir = DeriveUpscalerModelDir(exe);
 
 		model_name = gs.TextureUpscalerModelName;
+		step2_model_name = gs.TextureUpscalerStep2ModelName;
 		if (model_name.empty())
+		{
 			model_name = DefaultUpscalerModelName(model_dir);
+			// Fully-auto model selection: chain Upscayl's cartoon model as a second pass by
+			// default - sharpen (ultrasharp-4x) into stylize (digital-art-4x) A/B-tested best on
+			// PS2-era art. Only when the user picked no step 1 model themselves; an explicit
+			// step 1 choice keeps the chain exactly as configured.
+			if (step2_model_name.empty() && ModelExistsInDir(model_dir, "digital-art-4x"))
+				step2_model_name = "digital-art-4x";
+		}
+	}
+
+	// Flatten the configured steps into one ordered pass list: step 1 always runs (its model name
+	// may have just been auto-detected above); steps 2/3 are appended only when their model name
+	// is non-blank (step 2's may also have just been defaulted). Each step contributes its repeat
+	// count worth of identical consecutive entries.
+	std::vector<UpscaleStep> steps;
+	if (want_enabled)
+	{
+		const auto append_step = [&steps](const std::string& step_model, int scale, int repeat) {
+			if (step_model.empty())
+				return;
+			repeat = std::clamp(repeat, 1, MAX_STEP_REPEAT);
+			for (int i = 0; i < repeat; i++)
+				steps.push_back(UpscaleStep{step_model, scale});
+		};
+
+		append_step(model_name, gs.TextureUpscalerScale, gs.TextureUpscalerPasses);
+		append_step(step2_model_name, gs.TextureUpscalerStep2Scale, gs.TextureUpscalerStep2Repeat);
+		append_step(gs.TextureUpscalerStep3ModelName, gs.TextureUpscalerStep3Scale, gs.TextureUpscalerStep3Repeat);
 	}
 
 	std::unique_lock<std::mutex> lock(s_mutex);
 	s_exe_path = std::move(exe);
 	s_model_dir = std::move(model_dir);
-	s_model_name = std::move(model_name);
-	s_scale = gs.TextureUpscalerScale;
-	s_passes = std::clamp(gs.TextureUpscalerPasses, 1, MAX_UPSCALER_PASSES);
+	s_steps = std::move(steps);
 	s_gpu_id = gs.TextureUpscalerGpuId;
 	s_tile_size = gs.TextureUpscalerTileSize;
-	s_enabled.store(want_enabled && !s_exe_path.empty(), std::memory_order_relaxed);
+	// Step 1's model name can only come up empty if auto-detection also failed to find one -
+	// nothing usable to run, so treat it the same as no executable configured.
+	s_enabled.store(want_enabled && !s_exe_path.empty() && !s_steps.empty(), std::memory_order_relaxed);
 
 	s_min_size.store(static_cast<u32>(std::max(gs.TextureUpscalerMinSize, 0)), std::memory_order_relaxed);
 }
@@ -433,7 +479,7 @@ void GSTextureUpscaler::QueueUpscale(std::string dump_path, std::string replacem
 
 	s_pending_outputs.insert(replacement_path);
 	s_queue.push_back(Job{std::move(dump_path), std::move(replacement_path), s_exe_path, s_model_dir,
-		s_model_name, s_scale, s_passes, s_gpu_id, s_tile_size});
+		s_steps, s_gpu_id, s_tile_size});
 	s_progress_total++;
 
 	StartWorkerLocked();
@@ -624,8 +670,7 @@ void GSTextureUpscaler::WorkerThreadEntryPoint()
 			const Job& next = s_queue.front();
 			const Job& first = batch.front();
 			if (next.exe_path != first.exe_path || next.model_dir != first.model_dir ||
-				next.model_name != first.model_name || next.scale != first.scale ||
-				next.passes != first.passes || next.gpu_id != first.gpu_id || next.tile_size != first.tile_size)
+				next.steps != first.steps || next.gpu_id != first.gpu_id || next.tile_size != first.tile_size)
 			{
 				break;
 			}
@@ -671,12 +716,15 @@ void GSTextureUpscaler::WorkerThreadEntryPoint()
 	s_worker_running = false;
 }
 
-// Builds the argument list common to Real-ESRGAN-ncnn-vulkan / upscayl-bin CLIs. Input/output
-// may be files (single mode) or directories (batch mode - the CLI natively supports both).
-// Kept as separate string tokens; platform code below handles quoting/escaping.
+// Builds the argument list common to Real-ESRGAN-ncnn-vulkan / upscayl-bin CLIs, for one step
+// of job's chain. Input/output may be files (single mode) or directories (batch mode - the CLI
+// natively supports both). Kept as separate string tokens; platform code below handles
+// quoting/escaping.
 static std::vector<std::string> BuildUpscalerArgs(
-	const GSTextureUpscaler::Job& job, const std::string& input, const std::string& output)
+	const GSTextureUpscaler::Job& job, size_t step_index, const std::string& input, const std::string& output)
 {
+	const GSTextureUpscaler::UpscaleStep& step = job.steps[step_index];
+
 	std::vector<std::string> args;
 	args.push_back("-i");
 	args.push_back(input);
@@ -684,20 +732,20 @@ static std::vector<std::string> BuildUpscalerArgs(
 	args.push_back(output);
 	args.push_back("-f");
 	args.push_back("png");
-	if (job.scale > 0)
+	if (step.scale > 0)
 	{
 		args.push_back("-s");
-		args.push_back(std::to_string(job.scale));
+		args.push_back(std::to_string(step.scale));
 	}
 	if (!job.model_dir.empty())
 	{
 		args.push_back("-m");
 		args.push_back(job.model_dir);
 	}
-	if (!job.model_name.empty())
+	if (!step.model_name.empty())
 	{
 		args.push_back("-n");
-		args.push_back(job.model_name);
+		args.push_back(step.model_name);
 	}
 	if (job.gpu_id >= 0)
 	{
@@ -716,7 +764,8 @@ static std::vector<std::string> BuildUpscalerArgs(
 	if (tile_size > 0)
 	{
 		args.push_back("-t");
-		args.push_back(std::to_string(tile_size));
+		// The CLI rejects tile sizes below 32.
+		args.push_back(std::to_string(std::max(tile_size, 32)));
 	}
 	return args;
 }
@@ -1091,16 +1140,17 @@ static void DeleteAllStageDirs(const std::string& work_dir)
 // Runs one upscaler process over a whole directory of textures. The AI model is loaded once
 // for the entire batch instead of once per texture, which is dramatically faster.
 //
-// Multi-pass (job.passes > 1) chains that per-directory invocation: pass N's output directory
-// becomes pass N+1's input directory, so the model runs over its own (now much larger) output.
-// Each pass gets its OWN directory rather than reusing "-in"/"-out" in place - Upscayl's own
-// "Double Upscayl" shipped a bug (upscayl/upscayl#485) where the final large output got
+// Multi-pass (job.steps has more than one entry) chains that per-directory invocation: pass N's
+// output directory becomes pass N+1's input directory, so the model runs over its own (now much
+// larger) output - possibly with a different model/scale per pass, when the chain crosses a step
+// boundary. Each pass gets its OWN directory rather than reusing "-in"/"-out" in place - Upscayl's
+// own "Double Upscayl" shipped a bug (upscayl/upscayl#485) where the final large output got
 // overwritten by an intermediate pass's file because they shared a path; distinct stageN
 // directories make that class of bug structurally impossible here.
 u32 GSTextureUpscaler::RunUpscalerBatch(const std::vector<Job>& jobs, std::vector<std::string>* completed)
 {
 	const std::string work_dir(GetBatchWorkDirectory(std::string(Path::GetDirectory(jobs.front().input))));
-	const int passes = std::clamp(jobs.front().passes, 1, MAX_UPSCALER_PASSES);
+	const int passes = static_cast<int>(jobs.front().steps.size());
 
 	std::vector<std::string> stage_dirs;
 	stage_dirs.reserve(static_cast<size_t>(passes) + 1);
@@ -1149,7 +1199,7 @@ u32 GSTextureUpscaler::RunUpscalerBatch(const std::vector<Job>& jobs, std::vecto
 	bool process_ok = true;
 	for (int pass = 0; pass < passes; pass++)
 	{
-		process_ok = RunProcessAndWait(jobs.front().exe_path, BuildUpscalerArgs(jobs.front(), stage_dirs[pass], stage_dirs[pass + 1])) && process_ok;
+		process_ok = RunProcessAndWait(jobs.front().exe_path, BuildUpscalerArgs(jobs.front(), pass, stage_dirs[pass], stage_dirs[pass + 1])) && process_ok;
 		if (s_stop.load(std::memory_order_relaxed))
 			break;
 
@@ -1172,7 +1222,19 @@ u32 GSTextureUpscaler::RunUpscalerBatch(const std::vector<Job>& jobs, std::vecto
 		const std::string filename(Path::GetFileName(job.input));
 		const std::string produced(Path::Combine(out_dir, filename));
 		if (!FileSystem::FileExists(produced.c_str()))
+		{
+			// The upscaler silently drops files it can't process (e.g. OOM on a huge cumulative
+			// scale) rather than erroring per-file, and we don't capture its stdout/stderr - so
+			// this is the only diagnostic available. Logging the input size at least lets a
+			// dimension-related failure (very large chains on already-large dumps) be spotted by
+			// eye instead of just "some textures went missing".
+			u32 width = 0, height = 0;
+			if (GetPNGDimensions(job.input, &width, &height))
+				Console.WarningFmt("Texture upscale produced no output for '{}' ({}x{} input).", filename, width, height);
+			else
+				Console.WarningFmt("Texture upscale produced no output for '{}'.", filename);
 			continue;
+		}
 
 		// Re-decode the original (only if it staged as opaque) to restore its color/alpha.
 		SourceImage source;
@@ -1201,6 +1263,10 @@ u32 GSTextureUpscaler::RunUpscalerBatch(const std::vector<Job>& jobs, std::vecto
 			DevCon.WriteLnFmt("Upscaled texture '{}'.", Path::GetFileName(job.output));
 			completed->push_back(job.output);
 			ok_count++;
+		}
+		else
+		{
+			Console.WarningFmt("Texture upscale produced an unusable output for '{}' (truncated/corrupt result, or failed to move into place).", filename);
 		}
 	}
 
