@@ -13,6 +13,12 @@
 #include "pcsx2/GS/GSCapture.h"
 #include "pcsx2/GS/GSUtil.h"
 
+#ifdef _WIN32
+static const char* UPSCALER_EXECUTABLE_FILTER = QT_TRANSLATE_NOOP("GraphicsSettingsWidget", "Executables (*.exe);;All Files (*.*)");
+#else
+static const char* UPSCALER_EXECUTABLE_FILTER = QT_TRANSLATE_NOOP("GraphicsSettingsWidget", "All Files (*)");
+#endif
+
 struct RendererInfo
 {
 	const char* name;
@@ -230,6 +236,31 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
 	connect(m_ui.loadTextureReplacements, &QCheckBox::checkStateChanged, this, &GraphicsSettingsWidget::onTextureReplacementChanged);
 	onTextureDumpChanged();
 	onTextureReplacementChanged();
+
+	//////////////////////////////////////////////////////////////////////////
+	// AI Texture Upscaling
+	//////////////////////////////////////////////////////////////////////////
+	SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_ui.upscaleReplacementTextures, "EmuCore/GS", "UpscaleReplacementTextures", false);
+	// The executable/model paths are machine-local, so they're only editable in the global config
+	// (the folder binder below greys itself out per-game; mirror that for the executable picker).
+	// Both allow an empty value, which means "auto-detect an installed Upscayl".
+	SettingWidgetBinder::BindWidgetToFileSetting(sif, m_ui.textureUpscalerPath, m_ui.textureUpscalerBrowse, nullptr, nullptr,
+		"EmuCore/GS", "TextureUpscalerPath", std::string(), UPSCALER_EXECUTABLE_FILTER, !m_dialog->isPerGameSettings(), false, true);
+	SettingWidgetBinder::BindWidgetToFolderSetting(sif, m_ui.textureUpscalerModelDir, m_ui.textureUpscalerModelDirBrowse, nullptr, nullptr,
+		"EmuCore/GS", "TextureUpscalerModelDir", std::string(), false, true);
+	SettingWidgetBinder::BindWidgetToStringSetting(sif, m_ui.textureUpscalerModelName, "EmuCore/GS", "TextureUpscalerModelName");
+	SettingWidgetBinder::BindWidgetToIntSetting(sif, m_ui.textureUpscalerScale, "EmuCore/GS", "TextureUpscalerScale", 4);
+	SettingWidgetBinder::BindWidgetToIntSetting(sif, m_ui.textureUpscalerPasses, "EmuCore/GS", "TextureUpscalerPasses", 1);
+	// Steps 2/3 chain a second/third model after step 1 (e.g. a stylize model after a sharpen
+	// model); blank model name (the default) skips the step entirely.
+	SettingWidgetBinder::BindWidgetToStringSetting(sif, m_ui.textureUpscalerStep2ModelName, "EmuCore/GS", "TextureUpscalerStep2ModelName");
+	SettingWidgetBinder::BindWidgetToIntSetting(sif, m_ui.textureUpscalerStep2Scale, "EmuCore/GS", "TextureUpscalerStep2Scale", 4);
+	SettingWidgetBinder::BindWidgetToIntSetting(sif, m_ui.textureUpscalerStep2Repeat, "EmuCore/GS", "TextureUpscalerStep2Repeat", 1);
+	SettingWidgetBinder::BindWidgetToStringSetting(sif, m_ui.textureUpscalerStep3ModelName, "EmuCore/GS", "TextureUpscalerStep3ModelName");
+	SettingWidgetBinder::BindWidgetToIntSetting(sif, m_ui.textureUpscalerStep3Scale, "EmuCore/GS", "TextureUpscalerStep3Scale", 4);
+	SettingWidgetBinder::BindWidgetToIntSetting(sif, m_ui.textureUpscalerStep3Repeat, "EmuCore/GS", "TextureUpscalerStep3Repeat", 1);
+	SettingWidgetBinder::BindWidgetToIntSetting(sif, m_ui.textureUpscalerMinSize, "EmuCore/GS", "TextureUpscalerMinSize", 32);
+	SettingWidgetBinder::BindWidgetToIntSetting(sif, m_ui.textureUpscalerTileSize, "EmuCore/GS", "TextureUpscalerTileSize", 0);
 
 	if (m_dialog->isPerGameSettings())
 	{
@@ -701,7 +732,9 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
 
 	// Texture Replacement tab
 	{
-		dialog->registerWidgetHelp(m_ui.dumpReplaceableTextures, tr("Dump Textures"), tr("Unchecked"), tr("Dumps replaceable textures to disk. Will reduce performance."));
+		dialog->registerWidgetHelp(m_ui.dumpReplaceableTextures, tr("Dump Textures"), tr("Unchecked"),
+			tr("Dumps replaceable textures to disk. Will reduce performance. This is independent of AI Upscaling below: turning that off "
+			   "does not turn this off, so dumping (and its unsafe-settings warning) continues until you uncheck this too."));
 
 		dialog->registerWidgetHelp(m_ui.dumpReplaceableMipmaps, tr("Dump Mipmaps"), tr("Unchecked"), tr("Includes mipmaps when dumping textures."));
 
@@ -712,6 +745,64 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* dialog, QWidget* 
 		dialog->registerWidgetHelp(m_ui.loadTextureReplacements, tr("Load Textures"), tr("Unchecked"), tr("Loads replacement textures where available and user-provided."));
 
 		dialog->registerWidgetHelp(m_ui.precacheTextureReplacements, tr("Precache Textures"), tr("Unchecked"), tr("Preloads all replacement textures to memory. Not necessary with asynchronous loading."));
+
+		dialog->registerWidgetHelp(m_ui.upscaleReplacementTextures, tr("Upscale Dumped Textures"), tr("Unchecked"),
+			tr("Runs an external AI upscaler (Real-ESRGAN / Upscayl) on every dumped texture in the background, and writes the result into the "
+			   "replacements folder. Requires Dump Textures to produce input, and Load Textures to display the results. Nothing is bundled with "
+			   "PCSX2: you must install the upscaler yourself, though the paths below are auto-detected from an Upscayl installation when left blank."));
+
+		dialog->registerWidgetHelp(m_ui.textureUpscalerPath, tr("Executable"), tr("Auto-detected"),
+			tr("Path to the upscaler executable (e.g. upscayl-bin or realesrgan-ncnn-vulkan). Leave blank to auto-detect an installed Upscayl."));
+
+		dialog->registerWidgetHelp(m_ui.textureUpscalerModelDir, tr("Model Directory"), tr("Auto-detected"),
+			tr("Folder containing the AI model files (.param/.bin). Leave blank to use the models bundled with the detected Upscayl installation."));
+
+		dialog->registerWidgetHelp(m_ui.textureUpscalerModelName, tr("Step 1 Model"), tr("Auto-detected"),
+			tr("Name of the AI model to use, without extension (e.g. ultrasharp-4x). Leave blank to pick automatically: ultrasharp-4x, "
+			   "chained into the digital-art-4x cartoon model as Step 2 when both ship with the detected Upscayl - the combination that "
+			   "works best on PS2-era art. Setting a model here disables that automatic chain."));
+
+		dialog->registerWidgetHelp(m_ui.textureUpscalerScale, tr("Step 1 Scale"), tr("4"),
+			tr("Output size multiplier. Most models are natively 4x; lower values downscale the result."));
+
+		dialog->registerWidgetHelp(m_ui.textureUpscalerPasses, tr("Step 1 Repeat"), tr("1"),
+			tr("Re-runs this step's model on its own output this many times (like Upscayl's \"Double Upscayl\"), for an effective scale of "
+			   "Step 1 Scale ^ Repeat - e.g. 4x with 2 repeats gives 16x. This is the only way past a model's fixed native scale, but "
+			   "each extra repeat reprocesses a much larger image through the model again, so processing time (and the on-disk/VRAM size "
+			   "of every replacement texture) grows steeply. Leave at 1 unless you specifically need very large output textures."));
+
+		dialog->registerWidgetHelp(m_ui.textureUpscalerStep2ModelName, tr("Step 2 Model"), tr("Automatic"),
+			tr("Optional second model, chained after Step 1 finishes (e.g. a stylize/cartoon model run after a sharpening upscale). "
+			   "When Step 1 Model is blank, this defaults to digital-art-4x; once Step 1 is set explicitly, leaving this blank skips "
+			   "the step entirely and Step 1 alone is used."));
+
+		dialog->registerWidgetHelp(m_ui.textureUpscalerStep2Scale, tr("Step 2 Scale"), tr("4"),
+			tr("Output size multiplier for the Step 2 model. Has no effect while Step 2 Model is blank."));
+
+		dialog->registerWidgetHelp(m_ui.textureUpscalerStep2Repeat, tr("Step 2 Repeat"), tr("1"),
+			tr("Re-runs the Step 2 model on its own output this many times, for an effective scale of Step 2 Scale ^ Repeat. "
+			   "See Step 1 Repeat for the cost tradeoff."));
+
+		dialog->registerWidgetHelp(m_ui.textureUpscalerStep3ModelName, tr("Step 3 Model"), tr("Unused"),
+			tr("Optional third model, chained after Step 2 finishes. Leave blank to skip this step entirely."));
+
+		dialog->registerWidgetHelp(m_ui.textureUpscalerStep3Scale, tr("Step 3 Scale"), tr("4"),
+			tr("Output size multiplier for the Step 3 model. Has no effect while Step 3 Model is blank."));
+
+		dialog->registerWidgetHelp(m_ui.textureUpscalerStep3Repeat, tr("Step 3 Repeat"), tr("1"),
+			tr("Re-runs the Step 3 model on its own output this many times, for an effective scale of Step 3 Scale ^ Repeat. "
+			   "See Step 1 Repeat for the cost tradeoff."));
+
+		dialog->registerWidgetHelp(m_ui.textureUpscalerMinSize, tr("Minimum Texture Size"), tr("32 px"),
+			tr("Textures whose smaller dimension is below this are left at native resolution. AI models produce noisy garbage on tiny "
+			   "inputs such as icons, dithered fills and gradient strips. 0 upscales everything."));
+
+		dialog->registerWidgetHelp(m_ui.textureUpscalerTileSize, tr("GPU Tile Size"), tr("Automatic"),
+			tr("Images are processed by the upscaler in tiles of this size, one GPU compute dispatch per tile. Larger tiles upscale "
+			   "faster - fewer tiles means less redundant work on the overlapping seams, which matters most for chained steps that "
+			   "re-process already-enlarged images - but each dispatch runs longer and uses more VRAM, which can starve the emulator's "
+			   "own rendering and cause stutter. Automatic uses small 64 px tiles while a game is running, and unlimited tile size "
+			   "when it is not (paused, menus, shut down)."));
 	}
 
 	// Post Processing tab

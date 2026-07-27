@@ -1244,6 +1244,300 @@
         </widget>
        </item>
        <item>
+        <widget class="QGroupBox" name="textureUpscalingBox">
+         <property name="title">
+          <string>AI Upscaling (Experimental)</string>
+         </property>
+         <layout class="QGridLayout" name="textureUpscalingLayout">
+          <item row="0" column="0" colspan="3">
+           <widget class="QCheckBox" name="upscaleReplacementTextures">
+            <property name="text">
+             <string>Upscale Dumped Textures</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0" colspan="3">
+           <widget class="QLabel" name="textureUpscalerDescription">
+            <property name="text">
+             <string>Enhances dumped textures with an external AI upscaler (Real-ESRGAN / Upscayl) in the background. Requires Dump Textures and Load Textures to be enabled. Leave the path fields blank to auto-detect an installed Upscayl.</string>
+            </property>
+            <property name="wordWrap">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="0">
+           <widget class="QLabel" name="textureUpscalerPathLabel">
+            <property name="text">
+             <string>Executable:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="1">
+           <widget class="QLineEdit" name="textureUpscalerPath">
+            <property name="placeholderText">
+             <string>(auto-detect)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="2">
+           <widget class="QPushButton" name="textureUpscalerBrowse">
+            <property name="text">
+             <string>Browse...</string>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="0">
+           <widget class="QLabel" name="textureUpscalerModelDirLabel">
+            <property name="text">
+             <string>Model Directory:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="1">
+           <widget class="QLineEdit" name="textureUpscalerModelDir">
+            <property name="placeholderText">
+             <string>(auto-detect)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="2">
+           <widget class="QPushButton" name="textureUpscalerModelDirBrowse">
+            <property name="text">
+             <string>Browse...</string>
+            </property>
+           </widget>
+          </item>
+          <item row="4" column="0">
+           <widget class="QLabel" name="textureUpscalerModelNameLabel">
+            <property name="text">
+             <string>Step 1 Model:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="4" column="1" colspan="2">
+           <widget class="QLineEdit" name="textureUpscalerModelName">
+            <property name="placeholderText">
+             <string>blank = auto (ultrasharp-4x + digital-art-4x)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="5" column="0">
+           <widget class="QLabel" name="textureUpscalerScaleLabel">
+            <property name="text">
+             <string>Step 1 Scale:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="5" column="1" colspan="2">
+           <widget class="QSpinBox" name="textureUpscalerScale">
+            <property name="minimum">
+             <number>1</number>
+            </property>
+            <property name="maximum">
+             <number>4</number>
+            </property>
+            <property name="value">
+             <number>4</number>
+            </property>
+           </widget>
+          </item>
+          <item row="6" column="0">
+           <widget class="QLabel" name="textureUpscalerPassesLabel">
+            <property name="text">
+             <string>Step 1 Repeat:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="6" column="1" colspan="2">
+           <widget class="QSpinBox" name="textureUpscalerPasses">
+            <property name="toolTip">
+             <string>Re-runs this step's model on its own output N times for an effective scale of Step 1 Scale ^ Repeat. Expensive - see the help text.</string>
+            </property>
+            <property name="minimum">
+             <number>1</number>
+            </property>
+            <property name="maximum">
+             <number>3</number>
+            </property>
+            <property name="value">
+             <number>1</number>
+            </property>
+           </widget>
+          </item>
+          <item row="7" column="0">
+           <widget class="QLabel" name="textureUpscalerStep2ModelNameLabel">
+            <property name="text">
+             <string>Step 2 Model:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="7" column="1" colspan="2">
+           <widget class="QLineEdit" name="textureUpscalerStep2ModelName">
+            <property name="placeholderText">
+             <string>(auto when Step 1 blank - else unused)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="8" column="0">
+           <widget class="QLabel" name="textureUpscalerStep2ScaleLabel">
+            <property name="text">
+             <string>Step 2 Scale:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="8" column="1" colspan="2">
+           <widget class="QSpinBox" name="textureUpscalerStep2Scale">
+            <property name="minimum">
+             <number>1</number>
+            </property>
+            <property name="maximum">
+             <number>4</number>
+            </property>
+            <property name="value">
+             <number>4</number>
+            </property>
+           </widget>
+          </item>
+          <item row="9" column="0">
+           <widget class="QLabel" name="textureUpscalerStep2RepeatLabel">
+            <property name="text">
+             <string>Step 2 Repeat:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="9" column="1" colspan="2">
+           <widget class="QSpinBox" name="textureUpscalerStep2Repeat">
+            <property name="toolTip">
+             <string>Re-runs this step's model on its own output N times for an effective scale of Step 2 Scale ^ Repeat. Expensive - see the help text.</string>
+            </property>
+            <property name="minimum">
+             <number>1</number>
+            </property>
+            <property name="maximum">
+             <number>3</number>
+            </property>
+            <property name="value">
+             <number>1</number>
+            </property>
+           </widget>
+          </item>
+          <item row="10" column="0">
+           <widget class="QLabel" name="textureUpscalerStep3ModelNameLabel">
+            <property name="text">
+             <string>Step 3 Model:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="10" column="1" colspan="2">
+           <widget class="QLineEdit" name="textureUpscalerStep3ModelName">
+            <property name="placeholderText">
+             <string>(unused - leave blank to skip)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="11" column="0">
+           <widget class="QLabel" name="textureUpscalerStep3ScaleLabel">
+            <property name="text">
+             <string>Step 3 Scale:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="11" column="1" colspan="2">
+           <widget class="QSpinBox" name="textureUpscalerStep3Scale">
+            <property name="minimum">
+             <number>1</number>
+            </property>
+            <property name="maximum">
+             <number>4</number>
+            </property>
+            <property name="value">
+             <number>4</number>
+            </property>
+           </widget>
+          </item>
+          <item row="12" column="0">
+           <widget class="QLabel" name="textureUpscalerStep3RepeatLabel">
+            <property name="text">
+             <string>Step 3 Repeat:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="12" column="1" colspan="2">
+           <widget class="QSpinBox" name="textureUpscalerStep3Repeat">
+            <property name="toolTip">
+             <string>Re-runs this step's model on its own output N times for an effective scale of Step 3 Scale ^ Repeat. Expensive - see the help text.</string>
+            </property>
+            <property name="minimum">
+             <number>1</number>
+            </property>
+            <property name="maximum">
+             <number>3</number>
+            </property>
+            <property name="value">
+             <number>1</number>
+            </property>
+           </widget>
+          </item>
+          <item row="13" column="0">
+           <widget class="QLabel" name="textureUpscalerMinSizeLabel">
+            <property name="text">
+             <string>Minimum Texture Size:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="13" column="1" colspan="2">
+           <widget class="QSpinBox" name="textureUpscalerMinSize">
+            <property name="minimum">
+             <number>0</number>
+            </property>
+            <property name="maximum">
+             <number>512</number>
+            </property>
+            <property name="singleStep">
+             <number>16</number>
+            </property>
+            <property name="value">
+             <number>32</number>
+            </property>
+            <property name="suffix">
+             <string> px</string>
+            </property>
+           </widget>
+          </item>
+          <item row="14" column="0">
+           <widget class="QLabel" name="textureUpscalerTileSizeLabel">
+            <property name="text">
+             <string>GPU Tile Size:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="14" column="1" colspan="2">
+           <widget class="QSpinBox" name="textureUpscalerTileSize">
+            <property name="specialValueText">
+             <string>Automatic</string>
+            </property>
+            <property name="minimum">
+             <number>0</number>
+            </property>
+            <property name="maximum">
+             <number>1024</number>
+            </property>
+            <property name="singleStep">
+             <number>32</number>
+            </property>
+            <property name="value">
+             <number>0</number>
+            </property>
+            <property name="suffix">
+             <string> px</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
         <spacer name="verticalSpacer_4">
          <property name="orientation">
           <enum>Qt::Orientation::Vertical</enum>

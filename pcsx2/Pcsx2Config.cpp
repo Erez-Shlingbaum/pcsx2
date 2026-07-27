@@ -776,6 +776,7 @@ Pcsx2Config::GSOptions::GSOptions()
 	LoadTextureReplacements = false;
 	LoadTextureReplacementsAsync = true;
 	PrecacheTextureReplacements = false;
+	UpscaleReplacementTextures = false;
 
 	EnableVideoCapture = true;
 	EnableVideoCaptureParameters = false;
@@ -883,7 +884,22 @@ bool Pcsx2Config::GSOptions::OptionsAreEqual(const GSOptions& right) const
 		OpEqu(Adapter) &&
 
 		OpEqu(HWDumpDirectory) &&
-		OpEqu(SWDumpDirectory));
+		OpEqu(SWDumpDirectory) &&
+
+		OpEqu(TextureUpscalerPath) &&
+		OpEqu(TextureUpscalerModelDir) &&
+		OpEqu(TextureUpscalerModelName) &&
+		OpEqu(TextureUpscalerScale) &&
+		OpEqu(TextureUpscalerPasses) &&
+		OpEqu(TextureUpscalerStep2ModelName) &&
+		OpEqu(TextureUpscalerStep2Scale) &&
+		OpEqu(TextureUpscalerStep2Repeat) &&
+		OpEqu(TextureUpscalerStep3ModelName) &&
+		OpEqu(TextureUpscalerStep3Scale) &&
+		OpEqu(TextureUpscalerStep3Repeat) &&
+		OpEqu(TextureUpscalerGpuId) &&
+		OpEqu(TextureUpscalerTileSize) &&
+		OpEqu(TextureUpscalerMinSize));
 }
 
 bool Pcsx2Config::GSOptions::operator!=(const GSOptions& right) const
@@ -1000,6 +1016,21 @@ void Pcsx2Config::GSOptions::LoadSave(SettingsWrapper& wrap)
 	SettingsWrapBitBool(LoadTextureReplacements);
 	SettingsWrapBitBool(LoadTextureReplacementsAsync);
 	SettingsWrapBitBool(PrecacheTextureReplacements);
+	SettingsWrapBitBool(UpscaleReplacementTextures);
+	SettingsWrapEntry(TextureUpscalerPath);
+	SettingsWrapEntry(TextureUpscalerModelDir);
+	SettingsWrapEntry(TextureUpscalerModelName);
+	SettingsWrapEntry(TextureUpscalerScale);
+	SettingsWrapEntry(TextureUpscalerPasses);
+	SettingsWrapEntry(TextureUpscalerStep2ModelName);
+	SettingsWrapEntry(TextureUpscalerStep2Scale);
+	SettingsWrapEntry(TextureUpscalerStep2Repeat);
+	SettingsWrapEntry(TextureUpscalerStep3ModelName);
+	SettingsWrapEntry(TextureUpscalerStep3Scale);
+	SettingsWrapEntry(TextureUpscalerStep3Repeat);
+	SettingsWrapEntry(TextureUpscalerGpuId);
+	SettingsWrapEntry(TextureUpscalerTileSize);
+	SettingsWrapEntry(TextureUpscalerMinSize);
 	SettingsWrapBitBool(EnableVideoCapture);
 	SettingsWrapBitBool(EnableVideoCaptureParameters);
 	SettingsWrapBitBool(VideoCaptureAutoResolution);

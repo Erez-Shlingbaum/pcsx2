@@ -786,6 +786,7 @@ struct Pcsx2Config
 					LoadTextureReplacements : 1,
 					LoadTextureReplacementsAsync : 1,
 					PrecacheTextureReplacements : 1,
+					UpscaleReplacementTextures : 1,
 					EnableVideoCapture : 1,
 					EnableVideoCaptureParameters : 1,
 					VideoCaptureAutoResolution : 1,
@@ -881,6 +882,35 @@ struct Pcsx2Config
 		std::string Adapter;
 		std::string HWDumpDirectory;
 		std::string SWDumpDirectory;
+
+		// AI upscaling of dumped textures (invokes an external Real-ESRGAN/Upscayl-compatible
+		// executable as a separate process; nothing is linked or bundled). Up to 3 steps run in
+		// sequence, each its own model/scale (e.g. a sharpen model followed by a stylize model),
+		// each optionally repeated 1-3 times in place (a la Upscayl's "Double Upscayl", for an
+		// effective scale of Scale^Repeat) - this is the only way to exceed a model's fixed native
+		// scale, since most Real-ESRGAN models are trained at a hard 4x and simply reject a higher
+		// -s. Cost is steep though: each extra repeat/step runs the model over ~scale^2 as many
+		// pixels as the last, so keep these at 1/unused unless the output resolution genuinely
+		// calls for it. Repeat counts are clamped to [1, MAX_STEP_REPEAT] even from the ini. Steps
+		// 2 and 3 are skipped entirely when their model name is blank (the default).
+		std::string TextureUpscalerPath;
+		std::string TextureUpscalerModelDir;
+		std::string TextureUpscalerModelName;
+		int TextureUpscalerScale = 4;
+		int TextureUpscalerPasses = 1;
+		std::string TextureUpscalerStep2ModelName; // blank = step unused
+		int TextureUpscalerStep2Scale = 4;
+		int TextureUpscalerStep2Repeat = 1;
+		std::string TextureUpscalerStep3ModelName; // blank = step unused
+		int TextureUpscalerStep3Scale = 4;
+		int TextureUpscalerStep3Repeat = 1;
+		// GPU index for multi-GPU systems (-1 = the CLI's default), deliberately INI-only (no UI).
+		int TextureUpscalerGpuId = -1;
+		// Fixed tile size (0 = adaptive, see BuildUpscalerArgs).
+		int TextureUpscalerTileSize = 0;
+		// Textures whose smaller dimension is below this aren't upscaled - AI models produce
+		// garbage on tiny inputs (icons, dithered fills, gradient strips).
+		int TextureUpscalerMinSize = 32;
 
 		GSOptions();
 

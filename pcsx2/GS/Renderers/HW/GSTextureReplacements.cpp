@@ -16,6 +16,7 @@
 #include "GS/GSExtra.h"
 #include "GS/GSLocalMemory.h"
 #include "GS/Renderers/HW/GSTextureReplacements.h"
+#include "GS/Renderers/HW/GSTextureUpscaler.h"
 #include "VMManager.h"
 
 #include <cinttypes>
@@ -105,6 +106,7 @@ namespace GSTextureReplacements
 	static std::optional<TextureName> ParseReplacementName(const std::string& filename);
 	static std::string GetGameTextureDirectory();
 	static std::string GetDumpFilename(const TextureName& name, u32 level);
+	static void QueueUpscaleForDumpedTextures();
 	template <GSTexture::Format format>
 	std::pair<u8, u8> GetBCAlphaMinMax(ReplacementTexture& rtex);
 	static void SetReplacementTextureAlphaMinMax(ReplacementTexture& rtex);
@@ -333,10 +335,13 @@ void GSTextureReplacements::Initialize()
 {
 	s_current_serial = VMManager::GetDiscSerial();
 
+	GSTextureUpscaler::UpdateConfig();
+
 	if (GSConfig.DumpReplaceableTextures || GSConfig.LoadTextureReplacements)
 		StartWorkerThread();
 
 	ReloadReplacementMap();
+	QueueUpscaleForDumpedTextures();
 }
 
 void GSTextureReplacements::GameChanged()
@@ -348,6 +353,12 @@ void GSTextureReplacements::GameChanged()
 	s_current_serial = std::move(new_serial);
 	ReloadReplacementMap();
 	ClearDumpedTextureList();
+
+	// Drop any upscale work still queued for the game we're leaving - otherwise it keeps consuming
+	// GPU/CPU under the new game, its OSD progress reflects the wrong game, and completed files for
+	// the old serial arrive interleaved with the new game's catch-up scan below.
+	GSTextureUpscaler::CancelPendingJobs();
+	QueueUpscaleForDumpedTextures();
 }
 
 /// If the given file exists in the given directory, but with a different case than the original file, write its path to `*output` and return true.
@@ -450,8 +461,58 @@ void GSTextureReplacements::ReloadReplacementMap()
 	}
 }
 
+void GSTextureReplacements::AddReplacementFiles(const std::vector<std::string>& paths)
+{
+	// Unlike ReloadReplacementMap(), this neither syncs the worker thread nor rescans the
+	// replacement directory - it just registers the given files, so it's cheap enough to run
+	// on the GS thread while the game is rendering.
+	if (s_current_serial.empty() || !GSConfig.LoadTextureReplacements)
+		return;
+
+	for (const std::string& path : paths)
+	{
+		const std::string filename(Path::GetFileName(path));
+		if (!GetLoader(filename))
+			continue;
+
+		std::optional<TextureName> name = ParseReplacementName(filename);
+		if (!name.has_value())
+			continue;
+
+		// Don't override an existing registration (e.g. a user-provided replacement for this same
+		// texture): emplace() keeps the old mapping, so injecting the new file too would leave the
+		// live texture and the persisted filename pointing at different files. Skip it entirely.
+		if (!s_replacement_texture_filenames.emplace(name.value(), path).second)
+			continue;
+
+		DbgCon.WriteLn("Registered %ux%u replacement '%s'", name->Width(), name->Height(), filename.c_str());
+
+		// If the texture is currently in use, swap it live via the async-load/injection path
+		// (the same one used when a replacement finishes loading after lookup). Textures that
+		// aren't resident just pick the file up on their next lookup. Skip palette textures
+		// when GPU palette conversion is active; those entries are indexed and can't be
+		// swapped for an RGBA replacement in-place.
+		if (g_texture_cache && !(GSConfig.GPUPaletteConversion && name->HasPalette()) &&
+			g_texture_cache->HasHashCacheEntry(HashCacheKeyFromTextureName(name.value())))
+		{
+			std::unique_lock<std::mutex> lock(s_replacement_texture_cache_mutex);
+			QueueAsyncReplacementTextureLoad(name.value(), path, GSConfig.HWMipmap, false);
+		}
+
+		// zero out the CLUT hash, because we need this for checking if there's any replacements with this hash when using paltex
+		name->CLUTHash = 0;
+		s_replacement_textures_without_clut_hash.insert(name.value());
+	}
+}
+
 void GSTextureReplacements::UpdateConfig(Pcsx2Config::GSOptions& old_config)
 {
+	GSTextureUpscaler::UpdateConfig();
+
+	// If upscaling was just turned on, catch up on textures that are already dumped.
+	if (GSConfig.UpscaleReplacementTextures && !old_config.UpscaleReplacementTextures)
+		QueueUpscaleForDumpedTextures();
+
 	// get rid of worker thread if it's no longer needed
 	if (s_worker_thread_running && !GSConfig.DumpReplaceableTextures && !GSConfig.LoadTextureReplacements)
 		StopWorkerThread();
@@ -478,6 +539,7 @@ void GSTextureReplacements::UpdateConfig(Pcsx2Config::GSOptions& old_config)
 
 void GSTextureReplacements::Shutdown()
 {
+	GSTextureUpscaler::Shutdown();
 	StopWorkerThread();
 
 	std::string().swap(s_current_serial);
@@ -831,11 +893,22 @@ void GSTextureReplacements::DumpTexture(const GSTextureCache::HashCacheKey& hash
 	u8* buffer = static_cast<u8*>(_aligned_malloc(pitch * static_cast<u32>(read_height), 32));
 	psm.rtx(mem, mem.GetOffset(TEX0.TBP0, TEX0.TBW, TEX0.PSM), block_rect, buffer, pitch, TEXA);
 
+	// if AI upscaling is enabled, work out where the upscaled replacement should land so the
+	// worker can hand it off to the (separate-process) upscaler after the dump is written.
+	std::string upscale_target;
+	if (GSTextureUpscaler::IsEnabled())
+	{
+		upscale_target = Path::Combine(Path::Combine(GetGameTextureDirectory(), TEXTURE_REPLACEMENT_SUBDIRECTORY_NAME),
+			Path::GetFileName(filename));
+	}
+
 	// okay, now we can actually dump it
 	const u32 buffer_offset = ((rect.top - block_rect.top) * pitch) + ((rect.left - block_rect.left) * sizeof(u32));
-	QueueWorkerThreadItem([filename = std::move(filename), tw, th, pitch, buffer, buffer_offset]() {
+	QueueWorkerThreadItem([filename = std::move(filename), upscale_target = std::move(upscale_target), tw, th, pitch, buffer, buffer_offset]() {
 		if (!SavePNGImage(filename.c_str(), tw, th, buffer + buffer_offset, pitch))
 			Console.Error(fmt::format("Failed to dump texture to '{}'.", filename));
+		else if (!upscale_target.empty())
+			GSTextureUpscaler::QueueUpscaleFromDump(filename, upscale_target);
 		_aligned_free(buffer);
 	}, false);
 }
@@ -843,6 +916,21 @@ void GSTextureReplacements::DumpTexture(const GSTextureCache::HashCacheKey& hash
 void GSTextureReplacements::ClearDumpedTextureList()
 {
 	s_dumped_textures.clear();
+}
+
+// Catch-up pass: DumpTexture only fires the first time a texture is seen (it skips dumps that
+// already exist on disk), so any dump left un-upscaled by an interrupted session would never be
+// retried. On game load we hand the dumps/replacements directories to the upscaler, which scans
+// them for dumps lacking a replacement and queues those - all on its own worker thread, so the
+// (slow) directory enumeration and per-file header reads never run on the GS thread.
+void GSTextureReplacements::QueueUpscaleForDumpedTextures()
+{
+	if (!GSTextureUpscaler::IsEnabled() || s_current_serial.empty())
+		return;
+
+	const std::string game_dir(GetGameTextureDirectory());
+	GSTextureUpscaler::QueueDirectoryScan(Path::Combine(game_dir, TEXTURE_DUMP_SUBDIRECTORY_NAME),
+		Path::Combine(game_dir, TEXTURE_REPLACEMENT_SUBDIRECTORY_NAME));
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -940,10 +1028,21 @@ void GSTextureReplacements::SyncWorkerThread()
 	if (!s_worker_thread.joinable())
 		return;
 
-	// not the most efficient by far, but it only gets called on config changes, so whatever
-	for (;;)
+	// Best-effort drain of pending work items before the caller (ReloadReplacementMap) rebuilds the
+	// map. Draining is a courtesy, NOT a correctness requirement: cache consistency is guarded by
+	// s_replacement_texture_cache_mutex plus the pending-set re-check inside the async-load work
+	// item, so a still-queued load that runs after the rebuild either bails (its name was cleared)
+	// or reloads the same file - and dump items don't touch the replacement caches at all.
+	//
+	// Crucially, this runs ON THE GS THREAD, and each queued work item can block on slow disk I/O
+	// (a large replacement decode, or - with texture dumping on - a PNG write). The queue can hold
+	// many such items, so an unbounded wait here sums their durations and freezes rendering for
+	// seconds-to-minutes, which presents as the game hanging (especially on cloud-synced folders).
+	// Cap the wait: whatever hasn't drained keeps processing on the worker thread in the background.
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+	while (!s_worker_thread_queue.empty())
 	{
-		if (s_worker_thread_queue.empty())
+		if (std::chrono::steady_clock::now() >= deadline)
 			break;
 
 		lock.unlock();
